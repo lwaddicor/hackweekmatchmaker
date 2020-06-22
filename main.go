@@ -114,12 +114,13 @@ func (m *SimpleMatchmaker) handlePlayer(w http.ResponseWriter, r *http.Request) 
 }
 
 func (m *SimpleMatchmaker) checkMatch() {
+	m.unmatchedPlayersMtx.Lock()
 	fmt.Printf("match size: %d queued players: %d\n", matchSize, len(m.unmatchedPlayers))
-	if matchSize > len(m.unmatchedPlayers) {
-		// Not enough players yet
+	enoughPlayers := matchSize > len(m.unmatchedPlayers)
+	m.unmatchedPlayersMtx.Unlock()
+	if !enoughPlayers {
 		return
 	}
-
 	m.unmatchedPlayersMtx.Lock()
 	matchPlayers := m.unmatchedPlayers[:matchSize]
 	m.unmatchedPlayers = m.unmatchedPlayers[matchSize:]
