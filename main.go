@@ -95,8 +95,10 @@ func checkMatch() {
 		return
 	}
 
+	unmatchedPlayersMtx.Lock()
 	matchPlayers := unmatchedPlayers[:matchSize]
 	unmatchedPlayers = unmatchedPlayers[matchSize:]
+	unmatchedPlayersMtx.Unlock()
 
 	mi := MatchInfo{
 		MatchedPlayers: true,
@@ -104,11 +106,15 @@ func checkMatch() {
 		AllocationUUID: uuid.New().String(),
 	}
 
+	playerAllocsMtx.Lock()
 	for _, p := range matchPlayers {
 		playerAlloc[p.PlayerUUID] = mi.AllocationUUID
 	}
+	playerAllocsMtx.Unlock()
 
+	matchesMtx.Lock()
 	matches[mi.AllocationUUID] = mi
+	matchesMtx.Unlock()
 
 	allocate(mi)
 }
