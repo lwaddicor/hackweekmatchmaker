@@ -6,24 +6,16 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
+	"github.com/caarlos0/env"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"github.com/lwaddicor/hackweekmatchmaker/mpclient"
 )
 
 const (
 	matchSize = 2
-)
-
-var (
-	matches    = make(map[string]MatchInfo)
-	matchesMtx sync.Mutex
-
-	unmatchedPlayers    []PlayerInfo
-	unmatchedPlayersMtx sync.Mutex
-
-	playerAlloc     = make(map[string]string)
-	playerAllocsMtx sync.Mutex
 )
 
 type PlayerInfo struct {
@@ -35,7 +27,8 @@ type MatchInfo struct {
 	MatchedPlayers bool
 	AllocationUUID string       `json:",omitempty"`
 	Players        []PlayerInfo `json:",omitempty"`
-	AllocationIP   string       `json:",omitempty"`
+	IP             string       `json:",omitempty"`
+	Port           int          `json:",omitempty"`
 	Aborted        bool         `json:",omitempty"`
 }
 
@@ -43,7 +36,38 @@ type endMatchRequest struct {
 	AllocationUUID string
 }
 
-func handlePlayer(w http.ResponseWriter, r *http.Request) {
+// Config contains settings for starting the matchmaker
+type Config struct {
+	FleetID   string `env:"MP_FLEET_ID"`
+	RegionID  string `env:"MP_REGION_ID"`
+	ProfileID int64  `env:"MP_PROFILE_ID"`
+}
+
+type SimpleMatchmaker struct {
+	mpClient mpclient.MultiplayClient
+
+	matches    map[string]MatchInfo
+	matchesMtx sync.Mutex
+
+	unmatchedPlayers    []PlayerInfo
+	unmatchedPlayersMtx sync.Mutex
+
+	playerAlloc     map[string]string
+	playerAllocsMtx sync.Mutex
+
+	cfg Config
+}
+
+func NewSimpleMatchmaker(cfg Config, client mpclient.MultiplayClient) *SimpleMatchmaker {
+	return &SimpleMatchmaker{
+		mpClient:    client,
+		matches:     make(map[string]MatchInfo),
+		playerAlloc: make(map[string]string),
+		cfg:         cfg,
+	}
+}
+
+func (m *SimpleMatchmaker) handlePlayer(w http.ResponseWriter, r *http.Request) {
 	var pl PlayerInfo
 	json.NewDecoder(r.Body).Decode(&pl)
 	pl.ip = r.RemoteAddr
@@ -56,7 +80,7 @@ func handlePlayer(w http.ResponseWriter, r *http.Request) {
 	var mi MatchInfo
 
 	// We know this player
-	alloc, ok := playerAlloc[pl.PlayerUUID]
+	alloc, ok := m.playerAlloc[pl.PlayerUUID]
 	if ok {
 		if alloc == "" {
 			fmt.Println("no match found yet")
@@ -65,7 +89,7 @@ func handlePlayer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		mi, ok = matches[alloc]
+		mi, ok = m.matches[alloc]
 		if !ok {
 			http.Error(w, "match missing", http.StatusInternalServerError)
 			return
@@ -75,30 +99,31 @@ func handlePlayer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Mark players as known
-	playerAllocsMtx.Lock()
-	playerAlloc[pl.PlayerUUID] = ""
-	playerAllocsMtx.Unlock()
+	m.playerAllocsMtx.Lock()
+	m.playerAlloc[pl.PlayerUUID] = ""
+	m.playerAllocsMtx.Unlock()
 
-	unmatchedPlayersMtx.Lock()
-	unmatchedPlayers = append(unmatchedPlayers, pl)
-	unmatchedPlayersMtx.Unlock()
+	m.unmatchedPlayersMtx.Lock()
+	m.unmatchedPlayers = append(m.unmatchedPlayers, pl)
+	m.unmatchedPlayersMtx.Unlock()
 
 	json.NewEncoder(w).Encode(mi)
 
 	// Trigger the matchmaker to do its thing
-	go checkMatch()
+	go m.checkMatch()
 }
 
-func checkMatch() {
-	if matchSize > len(playerAlloc) {
+func (m *SimpleMatchmaker) checkMatch() {
+	fmt.Printf("match size: %d queued players: %d\n", matchSize, len(m.unmatchedPlayers))
+	if matchSize > len(m.unmatchedPlayers) {
 		// Not enough players yet
 		return
 	}
 
-	unmatchedPlayersMtx.Lock()
-	matchPlayers := unmatchedPlayers[:matchSize]
-	unmatchedPlayers = unmatchedPlayers[matchSize:]
-	unmatchedPlayersMtx.Unlock()
+	m.unmatchedPlayersMtx.Lock()
+	matchPlayers := m.unmatchedPlayers[:matchSize]
+	m.unmatchedPlayers = m.unmatchedPlayers[matchSize:]
+	m.unmatchedPlayersMtx.Unlock()
 
 	mi := MatchInfo{
 		MatchedPlayers: true,
@@ -106,60 +131,95 @@ func checkMatch() {
 		AllocationUUID: uuid.New().String(),
 	}
 
-	playerAllocsMtx.Lock()
+	m.playerAllocsMtx.Lock()
 	for _, p := range matchPlayers {
-		playerAlloc[p.PlayerUUID] = mi.AllocationUUID
+		m.playerAlloc[p.PlayerUUID] = mi.AllocationUUID
 	}
-	playerAllocsMtx.Unlock()
+	m.playerAllocsMtx.Unlock()
 
-	matchesMtx.Lock()
-	matches[mi.AllocationUUID] = mi
-	matchesMtx.Unlock()
+	m.matchesMtx.Lock()
+	m.matches[mi.AllocationUUID] = mi
+	m.matchesMtx.Unlock()
 
-	allocate(mi)
+	if _, err := m.mpClient.Allocate(m.cfg.FleetID, m.cfg.RegionID, m.cfg.ProfileID, mi.AllocationUUID); err != nil {
+		fmt.Errorf("failed to allocate %s", mi.AllocationUUID)
+		//TODO(lw): Recover gracefully
+	}
+
+	ticker := time.NewTicker(time.Second)
+	for range ticker.C {
+		allocs, err := m.mpClient.Allocations(m.cfg.FleetID, m.cfg.RegionID, m.cfg.ProfileID, mi.AllocationUUID)
+		if err != nil {
+			// TODO(lw): Catch non retryable cases, like 404
+			continue
+		}
+
+		if len(allocs) == 0 {
+			// TODO(lw): Catch non retryable cases, in this case it dissapeared
+			break
+		}
+
+		alloc := allocs[0]
+		if alloc.IP != "" {
+			fmt.Printf("Got allocation: %s:%d\n", alloc.IP, alloc.GamePort)
+
+			m.matchesMtx.Lock()
+			v := m.matches[mi.AllocationUUID]
+			v.IP = alloc.IP
+			v.Port = alloc.GamePort
+			m.matches[mi.AllocationUUID] = v
+			m.matchesMtx.Unlock()
+			break
+		}
+		fmt.Printf("Waiting for allocation: %s\n", mi.AllocationUUID)
+	}
 }
 
-func handleEndMatch(w http.ResponseWriter, r *http.Request) {
-	matchesMtx.Lock()
-	defer matchesMtx.Unlock()
+func (m *SimpleMatchmaker) handleEndMatch(w http.ResponseWriter, r *http.Request) {
+	m.matchesMtx.Lock()
+	defer m.matchesMtx.Unlock()
 
-	playerAllocsMtx.Lock()
-	defer playerAllocsMtx.Unlock()
+	m.playerAllocsMtx.Lock()
+	defer m.playerAllocsMtx.Unlock()
 
 	var mer endMatchRequest
 	json.NewDecoder(r.Body).Decode(&mer)
 
-	mi, ok := matches[mer.AllocationUUID]
+	_, ok := m.matches[mer.AllocationUUID]
 	if !ok {
 		http.Error(w, "unknown match", http.StatusBadRequest)
 		return
 	}
 
-	deallocate(mi)
+	if err := m.mpClient.Deallocate(m.cfg.FleetID, mer.AllocationUUID); err != nil {
+		http.Error(w, "failed to deallocate", http.StatusInternalServerError)
+		return
+	}
 
-	delete(matches, mer.AllocationUUID)
-	delete(playerAlloc, mer.AllocationUUID)
+	delete(m.matches, mer.AllocationUUID)
+	delete(m.playerAlloc, mer.AllocationUUID)
 
-	json.NewEncoder(w).Encode(matches)
-}
-
-func allocate(mi MatchInfo) {
-	// TODO(lw): Go and allocate this server
-	fmt.Printf("allocate: match: %s", mi.AllocationUUID)
-}
-
-func deallocate(mi MatchInfo) {
-	// TODO(lw) Go and deallocate this server
-	fmt.Printf("deallocate: match: %s", mi.AllocationUUID)
+	json.NewEncoder(w).Encode(m.matches)
 }
 
 func main() {
-	r := mux.NewRouter()
-	r.HandleFunc("/player", handlePlayer)
-	r.HandleFunc("/end-match", handleEndMatch)
-
-	err := http.ListenAndServe(":8080", r)
+	mpClient, err := mpclient.NewClientFromEnv()
 	if err != nil {
+		log.Fatal(err)
+	}
+
+	var cfg Config
+	if err = env.Parse(&cfg); err != nil {
+		log.Fatal(err)
+	}
+
+	mm := NewSimpleMatchmaker(cfg, mpClient)
+
+	r := mux.NewRouter()
+	r.HandleFunc("/player", mm.handlePlayer)
+	r.HandleFunc("/end-match", mm.handleEndMatch)
+
+	if err = http.ListenAndServe(":8080", r); err != nil {
 		log.Println(err)
 	}
 }

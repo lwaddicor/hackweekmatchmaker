@@ -45,5 +45,4 @@ func TestMultiplayClient_Allocate(t *testing.T) {
 	fmt.Println("Deallocating")
 	require.NoError(t, c.Deallocate(fleetID, allocUUID))
 	fmt.Println("Deallocated")
-
 }
