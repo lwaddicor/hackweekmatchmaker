@@ -1,0 +1,92 @@
+# IDE exclusions
+.idea
+*.iml
+.vscode
+
+# Compiled Object files, Static and Dynamic libs (Shared Objects)
+*.o
+*.a
+*.so
+
+# Coverage reports
+coverage.out
+coverage.xml
+coverage.html
+
+# Folders
+_obj
+_test
+bin
+coverage
+gopath
+.vagrant
+
+# Architecture specific extensions/prefixes
+*.[568vq]
+[568vq].out
+
+*.cgo1.go
+*.cgo2.c
+_cgo_defun.c
+_cgo_gotypes.go
+_cgo_export.*
+
+_testmain.go
+
+*.exe
+*.test
+*.prof
+
+# Test apps
+apps/test*
+
+# Local tmp dir
+tmp
+
+# Log files
+*.log
+
+# Vim temp files
+*.swp
+
+# OSX Junk
+.DS_Store
+
+# Generated all.sql
+clanforge/all.sql
+clanforge/schema/all.sql
+clanforge/clanforgetest/data/all.sql
+
+# Checksum
+go.txt
+md5.txt
+
+# Custom install script.
+custom_install.sh
+
+# Local scripts folder
+_local/
+
+# glide workaround for issue where it which includes all OS dependencies
+# if a package is included in glide.yaml (required for pinning versions).
+# Unneeded deps from: vendor/github.com/docker/docker/pkg/mount (linux)
+vendor/github.com/docker/docker/pkg/mount/*_solaris.go
+vendor/github.com/docker/docker/pkg/mount/*_windows.go
+vendor/github.com/docker/docker/pkg/longpath/
+vendor/github.com/docker/docker/pkg/system/*_unsupported.go
+vendor/github.com/docker/docker/pkg/system/*_solaris.go
+vendor/github.com/docker/docker/pkg/system/*_windows.go
+vendor/github.com/docker/docker/pkg/symlink/*_windows.go
+vendor/github.com/docker/docker/pkg/system/*_darwin.go
+vendor/github.com/docker/docker/pkg/system/*_freebsd.go
+vendor/github.com/docker/docker/pkg/system/*_openbsd.go
+vendor/github.com/docker/docker/pkg/system/*_freebsd.go
+
+# glide workaround for issue where it includes all files from unneeded
+# root packages.
+# We only require vendor/github.com/opencontainers/libcontainer
+vendor/github.com/opencontainers/runc/*.go
+
+# Documentation
+docs/dist
+godocs/*
