@@ -68,11 +68,17 @@ func NewSimpleMatchmaker(cfg Config, client mpclient.MultiplayClient) *SimpleMat
 }
 
 func (m *SimpleMatchmaker) handlePlayer(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("Handle player")
 	var pl PlayerInfo
-	json.NewDecoder(r.Body).Decode(&pl)
+	if err := json.NewDecoder(r.Body).Decode(&pl); err != nil {
+		fmt.Println("failed decoding request: " + err.Error())
+		http.Error(w, "decode request", http.StatusBadRequest)
+		return
+	}
 	pl.ip = r.RemoteAddr
 
 	if pl.PlayerUUID == "" {
+		fmt.Println("missing player uuid")
 		http.Error(w, "missing player uuid", http.StatusBadRequest)
 		return
 	}
@@ -116,7 +122,7 @@ func (m *SimpleMatchmaker) handlePlayer(w http.ResponseWriter, r *http.Request) 
 func (m *SimpleMatchmaker) checkMatch() {
 	m.unmatchedPlayersMtx.Lock()
 	fmt.Printf("match size: %d queued players: %d\n", matchSize, len(m.unmatchedPlayers))
-	enoughPlayers := matchSize > len(m.unmatchedPlayers)
+	enoughPlayers := matchSize <= len(m.unmatchedPlayers)
 	m.unmatchedPlayersMtx.Unlock()
 	if !enoughPlayers {
 		return
@@ -177,6 +183,7 @@ func (m *SimpleMatchmaker) checkMatch() {
 }
 
 func (m *SimpleMatchmaker) handleEndMatch(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("Handle end match")
 	m.matchesMtx.Lock()
 	defer m.matchesMtx.Unlock()
 
@@ -184,7 +191,11 @@ func (m *SimpleMatchmaker) handleEndMatch(w http.ResponseWriter, r *http.Request
 	defer m.playerAllocsMtx.Unlock()
 
 	var mer endMatchRequest
-	json.NewDecoder(r.Body).Decode(&mer)
+	if err := json.NewDecoder(r.Body).Decode(&mer); err != nil {
+		fmt.Println("failed end match decoding request: " + err.Error())
+		http.Error(w, "decode request", http.StatusBadRequest)
+		return
+	}
 
 	_, ok := m.matches[mer.AllocationUUID]
 	if !ok {
@@ -204,13 +215,17 @@ func (m *SimpleMatchmaker) handleEndMatch(w http.ResponseWriter, r *http.Request
 }
 
 func main() {
-	mpClient, err := mpclient.NewClientFromEnv()
-	if err != nil {
-		log.Fatal(err)
-	}
+
+	fmt.Println("Hello")
+	//mpClient, err := mpclient.NewClientFromEnv()
+	//if err != nil {
+	//	log.Fatal(err)
+	//}
+
+	mpClient := mpclient.MockMultiplayClient{}
 
 	var cfg Config
-	if err = env.Parse(&cfg); err != nil {
+	if err := env.Parse(&cfg); err != nil {
 		log.Fatal(err)
 	}
 
@@ -220,7 +235,7 @@ func main() {
 	r.HandleFunc("/player", mm.handlePlayer)
 	r.HandleFunc("/end-match", mm.handleEndMatch)
 
-	if err = http.ListenAndServe(":8080", r); err != nil {
+	if err := http.ListenAndServe(":8085", r); err != nil {
 		log.Println(err)
 	}
 }
