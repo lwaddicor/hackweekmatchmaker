@@ -199,11 +199,13 @@ func (m *SimpleMatchmaker) handleEndMatch(w http.ResponseWriter, r *http.Request
 
 	_, ok := m.matches[mer.AllocationUUID]
 	if !ok {
+		fmt.Printf("unknown match: %s\n", mer.AllocationUUID)
 		http.Error(w, "unknown match", http.StatusBadRequest)
 		return
 	}
 
 	if err := m.mpClient.Deallocate(m.cfg.FleetID, mer.AllocationUUID); err != nil {
+		fmt.Println("deallocate error: %s", err.Error())
 		http.Error(w, "failed to deallocate", http.StatusInternalServerError)
 		return
 	}
@@ -217,12 +219,12 @@ func (m *SimpleMatchmaker) handleEndMatch(w http.ResponseWriter, r *http.Request
 func main() {
 
 	fmt.Println("Hello")
-	//mpClient, err := mpclient.NewClientFromEnv()
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
+	mpClient, err := mpclient.NewClientFromEnv()
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	mpClient := mpclient.MockMultiplayClient{}
+	//mpClient := mpclient.MockMultiplayClient{}
 
 	var cfg Config
 	if err := env.Parse(&cfg); err != nil {
@@ -235,7 +237,7 @@ func main() {
 	r.HandleFunc("/player", mm.handlePlayer)
 	r.HandleFunc("/end-match", mm.handleEndMatch)
 
-	if err := http.ListenAndServe(":8085", r); err != nil {
+	if err := http.ListenAndServe(":10855", r); err != nil {
 		log.Println(err)
 	}
 }

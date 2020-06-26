@@ -8,6 +8,7 @@ import (
 )
 
 func (m *multiplayClient) Deallocate(fleet, uuid string) error {
+	fmt.Printf("deallocate: fid: %s uuid: %s\n", fleet, uuid)
 	urlStr := fmt.Sprintf("%s/cfp/v2/fleet/%s/server/deallocate", m.baseURL, fleet)
 	u, err := url.Parse(urlStr)
 	if err != nil {

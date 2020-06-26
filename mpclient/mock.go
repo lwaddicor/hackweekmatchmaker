@@ -30,8 +30,8 @@ func (m MockMultiplayClient) Allocations(fleet, region string, profile int64, uu
 			FleetID:   "",
 			RegionID:  "",
 			MachineID: 0,
-			IP:        "127.0.0.1",
-			GamePort:  7777,
+			IP:        "35.205.254.215",
+			GamePort:  9200,
 			Error:     "",
 		},
 	}, nil
